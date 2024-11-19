@@ -3,6 +3,7 @@ use xplm::{
     data::{borrowed::DataRef, ArrayRead, ArrayReadWrite},
     debugln,
     flight_loop::{FlightLoop, FlightLoopCallback, LoopState},
+    menu::{ActionItem, Menu},
     plugin::{Plugin, PluginInfo},
     xplane_plugin,
 };
@@ -77,6 +78,7 @@ impl FlightLoopCallback for SetLights {
 
 struct Callbacks {
     _set_lights: FlightLoop,
+    _jf_menu: Menu,
 }
 
 impl Plugin for Callbacks {
@@ -86,8 +88,20 @@ impl Plugin for Callbacks {
         debugln!("[DR400Tweaks] Plugin start starting...");
         let mut set_lights = FlightLoop::new(SetLights::new());
         set_lights.schedule_after_loops(25);
+
+        let menu = Menu::new("JustFlight").unwrap();
+        menu.add_child(
+            ActionItem::new("Show/hide panel", |&_: &_| {
+                if let Ok(mut cmd) = Command::find("thranda/popup/1") {
+                    cmd.trigger();
+                }
+            })
+            .unwrap(),
+        );
+        menu.add_to_plugins_menu();
         Ok(Callbacks {
             _set_lights: set_lights,
+            _jf_menu: menu,
         })
     }
 
