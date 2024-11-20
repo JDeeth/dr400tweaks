@@ -9,6 +9,7 @@ It fixes a couple of issues (as of JF_Robin_DR400 v1.9.2):
 - landing lights not working when starting cold and dark
 - panel brightness defaulting to eyeball-searing
 - provide menu item to replace the on-screen arrow to open the JustFlight popup
+- canopy open when starting with engine not running
 
 ### Landing lights
 The DR400 has separate left and right landing lights, which are mapped to the

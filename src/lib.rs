@@ -1,6 +1,6 @@
 use xplm::{
     command::Command,
-    data::{borrowed::DataRef, ArrayRead, ArrayReadWrite},
+    data::{borrowed::DataRef, ArrayRead, ArrayReadWrite, DataRead},
     debugln,
     flight_loop::{FlightLoop, FlightLoopCallback, LoopState},
     menu::{ActionItem, Menu},
@@ -76,18 +76,40 @@ impl FlightLoopCallback for SetLights {
     }
 }
 
-struct Callbacks {
-    _set_lights: FlightLoop,
+struct DR400Tweaks {
     _jf_menu: Menu,
+    _callbacks: Vec<FlightLoop>,
 }
 
-impl Plugin for Callbacks {
+impl Plugin for DR400Tweaks {
     type Error = std::convert::Infallible;
 
     fn start() -> Result<Self, Self::Error> {
         debugln!("[DR400Tweaks] Plugin start starting...");
+
+        let mut callbacks = Vec::new();
+
         let mut set_lights = FlightLoop::new(SetLights::new());
         set_lights.schedule_after_loops(25);
+        callbacks.push(set_lights);
+
+        if let Ok(start_running) = DataRef::<i32>::find("sim/operation/prefs/startup_running") {
+            if start_running.get() == 0 {
+                callbacks.push(FlightLoop::new(|state: &mut LoopState| {
+                    let mut door_switch =
+                        DataRef::<[f32]>::find("sim/cockpit2/switches/door_open_ratio")
+                            .unwrap()
+                            .writeable()
+                            .unwrap();
+                    let mut switch_pos = door_switch.as_vec();
+                    switch_pos[1] = 1f32;
+                    door_switch.set(&switch_pos);
+
+                    state.deactivate();
+                }));
+                callbacks.last_mut().unwrap().schedule_after_loops(1);
+            }
+        }
 
         let menu = Menu::new("JustFlight").unwrap();
         menu.add_child(
@@ -99,9 +121,9 @@ impl Plugin for Callbacks {
             .unwrap(),
         );
         menu.add_to_plugins_menu();
-        Ok(Callbacks {
-            _set_lights: set_lights,
+        Ok(DR400Tweaks {
             _jf_menu: menu,
+            _callbacks: callbacks,
         })
     }
 
@@ -125,4 +147,4 @@ impl Plugin for Callbacks {
     }
 }
 
-xplane_plugin!(Callbacks);
+xplane_plugin!(DR400Tweaks);
