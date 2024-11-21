@@ -1,8 +1,8 @@
 use xplm::{
     command::Command,
-    data::{borrowed::DataRef, ArrayRead, ArrayReadWrite, DataRead},
+    data::{borrowed::DataRef, ArrayRead, ArrayReadWrite, DataRead, DataType, ReadWrite},
     debugln,
-    flight_loop::{FlightLoop, FlightLoopCallback, LoopState},
+    flight_loop::{FlightLoop, LoopState},
     menu::{ActionItem, Menu},
     plugin::{Plugin, PluginInfo},
     xplane_plugin,
@@ -10,75 +10,19 @@ use xplm::{
 
 extern crate xplm;
 
-enum NextStep {
-    SetDefaults,
-    ResetLeftRightLLSwitch,
-    Stop,
-}
-struct SetLights {
-    _next_step: NextStep,
-}
-
-impl SetLights {
-    fn new() -> SetLights {
-        SetLights {
-            _next_step: NextStep::SetDefaults,
-        }
-    }
-    fn set_defaults(&mut self) {
-        debugln!("[DR400Tweaks] Setting defaults");
-        let mut panel_brightness_switches =
-            DataRef::<[f32]>::find("sim/cockpit2/switches/panel_brightness_ratio")
-                .expect("stock panel brightness dataref to exist")
-                .writeable()
-                .expect("panel brightness switch dataref to be writeable");
-        let mut positions = panel_brightness_switches.as_vec();
-        if positions[0] > 0.0 {
-            debugln!("[DR400Tweaks] Reducing panel brightness to 0.01");
-            positions[0] = 0.01;
-            panel_brightness_switches.set(&positions);
-        }
-
-        debugln!("[DR400Tweaks] Turning on landing light switch 1");
-        let mut landing_light_switches =
-            DataRef::<[f32]>::find("sim/cockpit2/switches/landing_lights_switch")
-                .expect("stock landing light switches dataref to exist")
-                .writeable()
-                .expect("landing light switches dataref to be writeable");
-        let mut positions = landing_light_switches.as_vec();
-        positions[0] = 1.0;
-        landing_light_switches.set(&positions);
-        self._next_step = match positions[1] < 0.1 {
-            true => NextStep::ResetLeftRightLLSwitch,
-            false => NextStep::Stop,
-        };
-    }
-
-    fn reset_landing_lights(&mut self) {
-        debugln!("[DR400Tweaks] Turning off left and right landing lights");
-        Command::find("sim/lights/landing_02_light_off")
-            .expect("stock command to exist")
-            .trigger();
-        Command::find("sim/lights/landing_03_light_off")
-            .expect("stock command to exist")
-            .trigger();
-        self._next_step = NextStep::Stop;
-    }
-}
-
-impl FlightLoopCallback for SetLights {
-    fn flight_loop(&mut self, state: &mut LoopState) {
-        match self._next_step {
-            NextStep::SetDefaults => self.set_defaults(),
-            NextStep::ResetLeftRightLLSwitch => self.reset_landing_lights(),
-            NextStep::Stop => state.deactivate(),
-        };
-    }
+fn writeable_dataref<T: ?Sized>(name: &str) -> DataRef<T, ReadWrite>
+where
+    T: DataType,
+{
+    DataRef::<T>::find(name)
+        .expect("dataref to exist")
+        .writeable()
+        .expect("dataref to be writable")
 }
 
 struct DR400Tweaks {
-    _jf_menu: Menu,
     _callbacks: Vec<FlightLoop>,
+    _jf_menu: Menu,
 }
 
 impl Plugin for DR400Tweaks {
@@ -89,18 +33,35 @@ impl Plugin for DR400Tweaks {
 
         let mut callbacks = Vec::new();
 
-        let mut set_lights = FlightLoop::new(SetLights::new());
-        set_lights.schedule_after_loops(25);
-        callbacks.push(set_lights);
+        callbacks.push(FlightLoop::new(|state: &mut LoopState| {
+            let mut panel_brightness_switches =
+                writeable_dataref::<[f32]>("sim/cockpit2/switches/panel_brightness_ratio");
+            let mut positions = panel_brightness_switches.as_vec();
+            if positions[0] > 0.0 {
+                positions[0] = 0.01;
+                panel_brightness_switches.set(&positions);
+            }
+
+            let mut landing_light_switches =
+                writeable_dataref::<[f32]>("sim/cockpit2/switches/landing_lights_switch");
+            let mut positions = landing_light_switches.as_vec();
+            positions[0] = 1.0;
+            landing_light_switches.set(&positions);
+            state.deactivate();
+        }));
+        callbacks.last_mut().unwrap().schedule_after_loops(25);
 
         if let Ok(start_running) = DataRef::<i32>::find("sim/operation/prefs/startup_running") {
             if start_running.get() == 0 {
                 callbacks.push(FlightLoop::new(|state: &mut LoopState| {
+                    let mut door_cycle_time =
+                        writeable_dataref::<[f32]>("sim/flightmodel2/misc/door_cycle_time");
+                    let mut cycles = door_cycle_time.as_vec();
+                    cycles[1] = 0.001f32;
+                    door_cycle_time.set(&cycles);
+
                     let mut door_switch =
-                        DataRef::<[f32]>::find("sim/cockpit2/switches/door_open_ratio")
-                            .unwrap()
-                            .writeable()
-                            .unwrap();
+                        writeable_dataref::<[f32]>("sim/cockpit2/switches/door_open_ratio");
                     let mut switch_pos = door_switch.as_vec();
                     switch_pos[1] = 1f32;
                     door_switch.set(&switch_pos);
@@ -108,6 +69,23 @@ impl Plugin for DR400Tweaks {
                     state.deactivate();
                 }));
                 callbacks.last_mut().unwrap().schedule_after_loops(1);
+
+                callbacks.push(FlightLoop::new(|state: &mut LoopState| {
+                    let mut door_cycle_time =
+                        writeable_dataref::<[f32]>("sim/flightmodel2/misc/door_cycle_time");
+                    let mut cycles = door_cycle_time.as_vec();
+                    cycles[1] = 1f32;
+                    door_cycle_time.set(&cycles);
+
+                    Command::find("sim/lights/landing_02_light_off")
+                        .expect("stock command to exist")
+                        .trigger();
+                    Command::find("sim/lights/landing_03_light_off")
+                        .expect("stock command to exist")
+                        .trigger();
+                    state.deactivate();
+                }));
+                callbacks.last_mut().unwrap().schedule_after_loops(50);
             }
         }
 
@@ -122,8 +100,8 @@ impl Plugin for DR400Tweaks {
         );
         menu.add_to_plugins_menu();
         Ok(DR400Tweaks {
-            _jf_menu: menu,
             _callbacks: callbacks,
+            _jf_menu: menu,
         })
     }
 
